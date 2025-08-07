@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Dispatch System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .nav-link { transition: all 0.2s ease-in-out; }
+        .nav-link.active { background-color: #3b82f6; color: white; }
+        .page { display: none; }
+        .page.active { display: block; animation: fadeIn 0.5s; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <!-- App Container -->
+    <div id="app">
+
+        <!-- Login Screen (Visible by default) -->
+        <div id="login-screen" class="flex items-center justify-center min-h-screen">
+            <div class="w-full max-w-md p-8 space-y-6 bg-white rounded-xl shadow-lg">
+                <div class="text-center">
+                    <h1 class="text-3xl font-bold text-gray-900">Smart Dispatch System</h1>
+                    <p class="text-gray-500 mt-1">Please sign in to continue</p>
+                </div>
+                <form id="login-form" class="space-y-6">
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-gray-700">Email Address</label>
+                        <input type="email" id="email" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
+                        <input type="password" id="password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <p id="login-error" class="text-sm text-red-600"></p>
+                    <div>
+                        <button type="submit" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                            Sign In
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Main Application (Hidden by default) -->
+        <div id="main-app" class="hidden">
+            <div class="flex h-screen bg-gray-100">
+                <!-- Sidebar Navigation -->
+                <div class="w-64 bg-white shadow-md">
+                    <div class="p-6 border-b">
+                        <h2 class="text-xl font-bold text-gray-800">Menu</h2>
+                    </div>
+                    <nav class="mt-6">
+                        <a href="#dashboard" class="nav-link active flex items-center px-6 py-3 text-gray-600 hover:bg-gray-100">Dashboard</a>
+                        <a href="#packing" class="nav-link flex items-center px-6 py-3 text-gray-600 hover:bg-gray-100">Packing Station</a>
+                        <a href="#shipments" class="nav-link flex items-center px-6 py-3 text-gray-600 hover:bg-gray-100">Shipment Management</a>
+                        <a href="#reports" class="nav-link flex items-center px-6 py-3 text-gray-600 hover:bg-gray-100">Reports</a>
+                        <a href="#admin" id="admin-link" class="nav-link flex items-center px-6 py-3 text-gray-600 hover:bg-gray-100">Admin</a>
+                        <a href="#" id="logout-btn" class="nav-link flex items-center px-6 py-3 text-gray-600 hover:bg-gray-100 mt-8">Logout</a>
+                    </nav>
+                </div>
+
+                <!-- Main Content Area -->
+                <div class="flex-1 flex flex-col overflow-hidden">
+                    <header class="bg-white shadow-sm p-4 flex justify-between items-center">
+                        <h1 id="page-title" class="text-2xl font-semibold text-gray-800">Dashboard</h1>
+                        <div id="user-info" class="text-sm text-gray-600"></div>
+                    </header>
+                    <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-200 p-8">
+                        
+                        <!-- Page Content -->
+                        <div id="dashboard-page" class="page active">
+                            <h2 class="text-3xl font-bold">Dashboard / Daily Ops</h2>
+                            <p class="mt-2 text-gray-600">This will contain the step-by-step daily workflow.</p>
+                        </div>
+                        <div id="packing-page" class="page">
+                             <h2 class="text-3xl font-bold">Packing Station</h2>
+                             <p class="mt-2 text-gray-600">This will contain the packing station interface.</p>
+                        </div>
+                        <div id="shipments-page" class="page">
+                             <h2 class="text-3xl font-bold">Shipment Management</h2>
+                             <p class="mt-2 text-gray-600">This will contain the shipment management panel.</p>
+                        </div>
+                         <div id="reports-page" class="page">
+                             <h2 class="text-3xl font-bold">Reports & Backup</h2>
+                             <p class="mt-2 text-gray-600">This will contain reporting dashboards and data export functionality.</p>
+                        </div>
+                        <div id="admin-page" class="page">
+                             <h2 class="text-3xl font-bold">Admin Panel</h2>
+                             <p class="mt-2 text-gray-600">This will contain tools for managing stores, couriers, and users.</p>
+                        </div>
+
+                    </main>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        const SUPABASE_URL = 'https://jyzbdkuizwvqamsxqdfg.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp5emJka3Vpend2cWFtc3hxZGZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0MTE2MzUsImV4cCI6MjA2OTk4NzYzNX0.AqcKHtGPjm5fSijgjh8CMzrqRuheDRAefyU0prPwY2I';
+
+        const { createClient } = supabase;
+        const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const loginScreen = document.getElementById('login-screen');
+        const mainApp = document.getElementById('main-app');
+        const loginForm = document.getElementById('login-form');
+        const loginError = document.getElementById('login-error');
+        const logoutBtn = document.getElementById('logout-btn');
+        const navLinks = document.querySelectorAll('.nav-link');
+        const pages = document.querySelectorAll('.page');
+        const pageTitle = document.getElementById('page-title');
+        const userInfo = document.getElementById('user-info');
+        const adminLink = document.getElementById('admin-link');
+        
+        const showPage = (pageId) => {
+            pages.forEach(p => p.classList.remove('active'));
+            document.getElementById(`${pageId}-page`).classList.add('active');
+            
+            navLinks.forEach(l => l.classList.remove('active'));
+            document.querySelector(`a[href="#${pageId}"]`).classList.add('active');
+
+            const titleText = pageId.charAt(0).toUpperCase() + pageId.slice(1).replace('-', ' ');
+            pageTitle.textContent = titleText.replace('Packing', 'Packing Station').replace('Shipments', 'Shipment Management');
+        };
+
+        const handleLogin = async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            const { error } = await db.auth.signInWithPassword({ email, password });
+
+            if (error) {
+                loginError.textContent = error.message;
+            } else {
+                loginError.textContent = '';
+                checkSession();
+            }
+        };
+        
+        const handleLogout = async () => {
+            await db.auth.signOut();
+            checkSession();
+        };
+
+        const checkSession = async () => {
+            const { data: { session } } = await db.auth.getSession();
+            if (session) {
+                loginScreen.classList.add('hidden');
+                mainApp.classList.remove('hidden');
+                
+                const { data: userProfile } = await db.from('users').select('role, full_name').eq('id', session.user.id).single();
+                
+                userInfo.textContent = `Logged in as ${userProfile.full_name || session.user.email} (${userProfile.role})`;
+                
+                // Role-based access control
+                if (userProfile.role !== 'admin') {
+                    adminLink.style.display = 'none';
+                } else {
+                    adminLink.style.display = 'flex';
+                }
+                
+                // Set initial page based on hash or default to dashboard
+                const pageId = window.location.hash.substring(1) || 'dashboard';
+                showPage(pageId);
+            } else {
+                loginScreen.classList.remove('hidden');
+                mainApp.classList.add('hidden');
+            }
+        };
+
+        // Event Listeners
+        loginForm.addEventListener('submit', handleLogin);
+        logoutBtn.addEventListener('click', handleLogout);
+        
+        navLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                const pageId = e.currentTarget.hash.substring(1);
+                if(pageId) showPage(pageId);
+            });
+        });
+
+        // Initial check
+        checkSession();
+    </script>
+</body>
+</html>
