@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirm Your Delivery</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <div class="container mx-auto max-w-2xl my-8 p-6 sm:p-8 bg-white rounded-xl shadow-lg">
+        
+        <!-- Main Content: Initial View -->
+        <div id="initial-view">
+            <!-- Header -->
+            <div class="text-center border-b pb-6">
+                <h1 class="text-3xl font-bold text-gray-900">Delivery Confirmation</h1>
+                <p class="text-gray-500 mt-1">Please verify the contents of your delivery.</p>
+            </div>
+
+            <!-- Box Details -->
+            <div class="mt-8">
+                <div class="bg-gray-50 p-4 rounded-lg border">
+                    <p class="text-sm text-gray-500">Showing contents for Box ID:</p>
+                    <h2 class="text-2xl font-bold text-blue-700 font-mono" id="box-id-display">Loading...</h2>
+                    <p class="text-sm text-gray-600 mt-2" id="store-info-display"></p>
+                </div>
+            </div>
+
+            <!-- Order List -->
+            <div class="mt-6">
+                <h3 class="font-semibold text-lg mb-2">Items in this Box:</h3>
+                <ul id="order-list" class="space-y-2 max-h-80 overflow-y-auto border rounded-lg p-4 bg-gray-50">
+                    <!-- Orders will be dynamically inserted here -->
+                </ul>
+            </div>
+            
+            <!-- Consolidated Stores Info -->
+            <div id="consolidated-stores-container" class="mt-6 hidden">
+                <h3 class="font-semibold text-lg mb-2">Destination Stores:</h3>
+                <div id="consolidated-stores-list" class="text-sm text-gray-600 font-mono flex flex-wrap gap-2 border rounded-lg p-4 bg-gray-50"></div>
+            </div>
+
+
+            <!-- Action Buttons -->
+            <div class="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button id="report-issue-btn" class="w-full bg-red-600 text-white font-bold py-4 px-4 rounded-lg hover:bg-red-700 transition duration-300">
+                    Report Issue
+                </button>
+                <button id="confirm-received-btn" class="w-full bg-green-600 text-white font-bold py-4 px-4 rounded-lg hover:bg-green-700 transition duration-300">
+                    Confirm All Items Received
+                </button>
+            </div>
+        </div>
+
+        <!-- Confirmation View -->
+        <div id="confirmation-view" class="hidden text-center py-16">
+            <div id="confirmation-icon" class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-6">
+                <svg class="h-10 w-10 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+            </div>
+            <h2 class="text-2xl font-bold text-gray-900" id="confirmation-title">Thank You!</h2>
+            <p class="text-gray-600 mt-2" id="confirmation-message">Your confirmation has been recorded.</p>
+        </div>
+
+    </div>
+
+    <script type="module">
+        const SUPABASE_URL = 'https://jyzbdkuizwvqamsxqdfg.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp5emJka3Vpend2cWFtc3hxZGZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0MTE2MzUsImV4cCI6MjA2OTk4NzYzNX0.AqcKHtGPjm5fSijgjh8CMzrqRuheDRAefyU0prPwY2I';
+
+        const { createClient } = supabase;
+        const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const state = {
+            boxId: null,
+            shipmentId: null,
+        };
+
+        const UI = {
+            initialView: document.getElementById('initial-view'),
+            confirmationView: document.getElementById('confirmation-view'),
+            boxIdDisplay: document.getElementById('box-id-display'),
+            storeInfoDisplay: document.getElementById('store-info-display'),
+            orderList: document.getElementById('order-list'),
+            confirmReceivedBtn: document.getElementById('confirm-received-btn'),
+            reportIssueBtn: document.getElementById('report-issue-btn'),
+            confirmationIcon: document.getElementById('confirmation-icon'),
+            confirmationTitle: document.getElementById('confirmation-title'),
+            confirmationMessage: document.getElementById('confirmation-message'),
+            consolidatedStoresContainer: document.getElementById('consolidated-stores-container'),
+            consolidatedStoresList: document.getElementById('consolidated-stores-list'),
+        };
+
+        const loadOrderDetails = async () => {
+            const params = new URLSearchParams(window.location.search);
+            state.boxId = params.get('box');
+
+            if (!state.boxId) {
+                UI.boxIdDisplay.textContent = 'Error';
+                UI.storeInfoDisplay.textContent = 'No Box ID provided in the URL.';
+                UI.orderList.innerHTML = '';
+                UI.confirmReceivedBtn.disabled = true;
+                UI.reportIssueBtn.disabled = true;
+                return;
+            }
+
+            UI.boxIdDisplay.textContent = state.boxId;
+
+            // Find the shipment this box belongs to
+            const { data: shipmentItem, error: itemError } = await db.from('shipment_items')
+                .select(`shipments(*, couriers(name))`)
+                .eq('box_id', state.boxId)
+                .single();
+            
+            if (itemError || !shipmentItem) {
+                UI.storeInfoDisplay.textContent = 'This box has not been dispatched yet.';
+                UI.orderList.innerHTML = '';
+                UI.confirmReceivedBtn.disabled = true;
+                UI.reportIssueBtn.disabled = true;
+                return;
+            }
+
+            state.shipmentId = shipmentItem.shipments.id;
+
+            // Fetch all orders for this box
+            const { data: orders, error: ordersError } = await db.from('orders')
+                .select('gkb_order_no, store_code')
+                .eq('box_id', state.boxId);
+
+            if (ordersError) {
+                UI.orderList.innerHTML = '<li>Error loading order details.</li>';
+                return;
+            }
+            
+            // Fetch store details for the primary store to display address
+            const { data: store } = await db.from('stores')
+                .select('store_name, city, delivery_groups(full_address)')
+                .eq('store_code', orders[0].store_code)
+                .single();
+
+            UI.storeInfoDisplay.textContent = `To: ${store.delivery_groups.full_address}`;
+
+            UI.orderList.innerHTML = orders.map(order => `
+                <li class="p-3 bg-white border rounded-md flex justify-between items-center">
+                    <span class="font-mono">${order.gkb_order_no}</span>
+                    <span class="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">${order.store_code}</span>
+                </li>
+            `).join('');
+
+            // If it's a consolidated box, show all store codes
+            const uniqueStoreCodes = [...new Set(orders.map(o => o.store_code))];
+            if (uniqueStoreCodes.length > 1) {
+                UI.consolidatedStoresContainer.classList.remove('hidden');
+                UI.consolidatedStoresList.innerHTML = uniqueStoreCodes.map(code => `<span class="bg-gray-200 px-2 py-1 rounded">${code}</span>`).join('');
+            }
+        };
+
+        const handleConfirmation = async (status) => {
+            if (!state.shipmentId) return;
+
+            UI.confirmReceivedBtn.disabled = true;
+            UI.reportIssueBtn.disabled = true;
+
+            let notes = '';
+            if (status === 'Issue Reported') {
+                notes = prompt('Please describe the issue with your delivery:');
+            }
+
+            const { error } = await db.from('delivery_confirmations').insert({
+                shipment_id: state.shipmentId,
+                status: status,
+                notes: notes,
+                confirmed_by_name: 'Customer' 
+            });
+
+            if (error) {
+                alert('There was an error submitting your confirmation. Please try again.');
+                UI.confirmReceivedBtn.disabled = false;
+                UI.reportIssueBtn.disabled = false;
+            } else {
+                await db.from('shipments').update({ status: status === 'Received' ? 'Delivered' : 'Issue Reported' }).eq('id', state.shipmentId);
+                
+                UI.initialView.style.display = 'none';
+                UI.confirmationView.style.display = 'block';
+
+                if (status === 'Issue Reported') {
+                    UI.confirmationIcon.innerHTML = `<svg class="h-10 w-10 text-red-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>`;
+                    UI.confirmationIcon.classList.remove('bg-green-100');
+                    UI.confirmationIcon.classList.add('bg-red-100');
+                    UI.confirmationTitle.textContent = 'Issue Reported';
+                    UI.confirmationMessage.textContent = 'Thank you. Our team has been notified and will be in touch shortly.';
+                }
+            }
+        };
+
+        // Event Listeners
+        UI.confirmReceivedBtn.addEventListener('click', () => handleConfirmation('Received'));
+        UI.reportIssueBtn.addEventListener('click', () => handleConfirmation('Issue Reported'));
+
+        // Initial Load
+        loadOrderDetails();
+    </script>
+</body>
+</html>

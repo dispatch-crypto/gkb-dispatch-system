@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Dispatch - Packing Station</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .feedback-flash { transition: background-color 0.1s ease-in-out; }
+        .feedback-success { background-color: #16a34a !important; }
+        .feedback-error { background-color: #dc2626 !important; }
+        .lens-item.packed { background-color: #f0fdf4; color: #6b7280; text-decoration: line-through; }
+        .modal { display: none; }
+        .modal.active { display: flex; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <div id="feedback-container" class="feedback-flash min-h-screen">
+        <div class="w-full max-w-6xl mx-auto my-8 bg-white rounded-xl shadow-2xl">
+            <!-- Header -->
+            <div class="p-6 border-b text-center">
+                <h1 class="text-3xl font-bold text-gray-900">Packing Station</h1>
+                <p class="text-gray-500 mt-1" id="status-header">Scan a box to begin</p>
+            </div>
+
+            <div class="p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Left: Controls & Info -->
+                <div class="lg:col-span-1 space-y-6">
+                    <div>
+                        <label for="scanner-input" class="block text-sm font-medium text-gray-700 mb-1">Scan or Type Box/Lens ID</label>
+                        <input type="text" id="scanner-input" placeholder="Scan..." class="w-full p-4 border-2 border-gray-300 rounded-lg text-lg focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div id="box-info-card" class="bg-gray-50 p-6 rounded-lg border hidden">
+                        <h2 class="text-2xl font-bold text-blue-700" id="box-id-display"></h2>
+                        <p class="text-gray-600 mt-1" id="store-info-display"></p>
+                        <div class="mt-4">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-sm font-medium text-gray-700">Packing Progress</span>
+                                <span class="text-sm font-bold text-gray-800" id="progress-text">0 / 0</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-4"><div id="progress-bar" class="bg-blue-600 h-4 rounded-full transition-all duration-300" style="width: 0%"></div></div>
+                        </div>
+                        <div id="consolidated-stores-container" class="mt-4 hidden">
+                             <h3 class="text-sm font-medium text-gray-700 mb-1">Stores in this Box:</h3>
+                             <div id="consolidated-stores-list" class="text-xs text-gray-600 font-mono flex flex-wrap gap-2"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Lens Lists -->
+                <div class="lg:col-span-2 grid grid-cols-2 gap-6 min-h-[50vh]">
+                    <div class="bg-gray-100 rounded-lg p-4 flex flex-col">
+                        <h3 class="text-lg font-semibold mb-4 text-center">Pending</h3>
+                        <ul id="pending-lenses" class="space-y-2 overflow-y-auto flex-grow"></ul>
+                    </div>
+                    <div class="bg-gray-100 rounded-lg p-4 flex flex-col">
+                        <h3 class="text-lg font-semibold mb-4 text-center">Packed</h3>
+                        <ul id="packed-lenses" class="space-y-2 overflow-y-auto flex-grow"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Exception Modal -->
+    <div id="exception-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center">
+        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+            <h2 class="text-xl font-bold mb-4">Packing Exception</h2>
+            <p id="exception-message" class="mb-6 text-gray-600"></p>
+            <div class="flex justify-end space-x-4">
+                <button id="cancel-exception-btn" class="px-6 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 font-semibold">Cancel</button>
+                <button id="confirm-exception-btn" class="px-6 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 font-semibold">Yes, Add to this Box</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        const SUPABASE_URL = 'https://jyzbdkuizwvqamsxqdfg.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp5emJka3Vpend2cWFtc3hxZGZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0MTE2MzUsImV4cCI6MjA2OTk4NzYzNX0.AqcKHtGPjm5fSijgjh8CMzrqRuheDRAefyU0prPwY2I';
+
+        const { createClient } = supabase;
+        const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const state = {
+            currentBoxId: null,
+            orders: [],
+            dbSubscription: null,
+            exceptionOrder: null,
+        };
+
+        const UI = {
+            scannerInput: document.getElementById('scanner-input'),
+            statusHeader: document.getElementById('status-header'),
+            boxInfoCard: document.getElementById('box-info-card'),
+            boxIdDisplay: document.getElementById('box-id-display'),
+            storeInfoDisplay: document.getElementById('store-info-display'),
+            progressText: document.getElementById('progress-text'),
+            progressBar: document.getElementById('progress-bar'),
+            pendingLenses: document.getElementById('pending-lenses'),
+            packedLenses: document.getElementById('packed-lenses'),
+            feedbackContainer: document.getElementById('feedback-container'),
+            consolidatedStoresContainer: document.getElementById('consolidated-stores-container'),
+            consolidatedStoresList: document.getElementById('consolidated-stores-list'),
+            exceptionModal: document.getElementById('exception-modal'),
+            exceptionMessage: document.getElementById('exception-message'),
+            cancelExceptionBtn: document.getElementById('cancel-exception-btn'),
+            confirmExceptionBtn: document.getElementById('confirm-exception-btn'),
+        };
+
+        const Audio = {
+            ctx: new (window.AudioContext || window.webkitAudioContext)(),
+            play(type) { /* ... same as before ... */ }
+        };
+
+        function showFeedback(type, message) {
+            UI.statusHeader.textContent = message;
+            const feedbackClass = type === 'success' ? 'feedback-success' : 'feedback-error';
+            UI.feedbackContainer.classList.add(feedbackClass);
+            setTimeout(() => UI.feedbackContainer.classList.remove(feedbackClass), 200);
+        }
+
+        function renderLists() {
+            UI.pendingLenses.innerHTML = '';
+            UI.packedLenses.innerHTML = '';
+            let packedCount = 0;
+            const totalCount = state.orders.length;
+
+            state.orders.sort((a, b) => a.gkb_order_no.localeCompare(b.gkb_order_no)).forEach(order => {
+                const li = document.createElement('li');
+                const isPacked = order.status === 'Packed';
+                li.className = `lens-item p-3 rounded-md flex justify-between items-center ${isPacked ? 'packed' : 'bg-white shadow-sm hover:bg-gray-50 cursor-pointer'}`;
+                li.innerHTML = `<span class="font-mono text-base">${order.gkb_order_no}</span><span class="text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">${order.store_code}</span>`;
+                
+                if (!isPacked) {
+                    li.addEventListener('click', () => handleScan(order.gkb_order_no));
+                }
+
+                if (isPacked) {
+                    UI.packedLenses.prepend(li);
+                    packedCount++;
+                } else {
+                    UI.pendingLenses.appendChild(li);
+                }
+            });
+            
+            UI.progressText.textContent = `${packedCount} / ${totalCount}`;
+            UI.progressBar.style.width = totalCount > 0 ? `${(packedCount / totalCount) * 100}%` : '0%';
+        }
+
+        async function loadBox(boxId) {
+            if (state.dbSubscription) state.dbSubscription.unsubscribe();
+
+            const { data: boxData, error } = await db.from('boxes').select(`*, orders(*), delivery_groups(*)`).eq('box_id', boxId).single();
+            if (error || !boxData) {
+                showFeedback('error', `Box ID "${boxId}" not found.`); Audio.play('error'); return;
+            }
+            if (boxData.status === 'Packed') {
+                showFeedback('error', `Box "${boxId}" is already fully packed.`); Audio.play('error'); return;
+            }
+
+            state.currentBoxId = boxId;
+            state.orders = boxData.orders;
+            
+            UI.boxIdDisplay.textContent = boxId;
+            UI.storeInfoDisplay.textContent = `To: ${boxData.delivery_groups.full_address}`;
+            UI.boxInfoCard.classList.remove('hidden');
+            UI.scannerInput.placeholder = 'Scan Lenses...';
+            
+            const storesInBox = [...new Set(boxData.orders.map(o => o.store_code))];
+            if (storesInBox.length > 1) {
+                UI.consolidatedStoresContainer.classList.remove('hidden');
+                UI.consolidatedStoresList.innerHTML = storesInBox.map(code => `<span class="bg-gray-200 px-2 py-1 rounded">${code}</span>`).join('');
+            } else {
+                UI.consolidatedStoresContainer.classList.add('hidden');
+            }
+
+            renderLists();
+            showFeedback('success', `Box loaded. Ready to pack ${state.orders.length} lenses.`);
+            
+            state.dbSubscription = db.channel(`public:orders:box_id=eq.${boxId}`)
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, payload => {
+                    const updatedOrder = payload.new;
+                    const orderIndex = state.orders.findIndex(o => o.gkb_order_no === updatedOrder.gkb_order_no);
+                    if (orderIndex > -1) {
+                        state.orders[orderIndex] = { ...state.orders[orderIndex], ...updatedOrder };
+                        renderLists();
+                    }
+                }).subscribe();
+        }
+
+        async function packLens(lensId) {
+            const orderInBox = state.orders.find(o => o.gkb_order_no === lensId);
+
+            if (orderInBox) { // Lens belongs to the current box
+                if (orderInBox.status === 'Packed') {
+                    showFeedback('error', `Warning: Lens "${lensId}" has already been packed.`); Audio.play('error'); return;
+                }
+                await updateOrderStatus(lensId, 'Packed', state.currentBoxId);
+            } else { // Exception: Lens does NOT belong to the current box
+                const { data: otherOrder, error } = await db.from('orders').select('*').eq('gkb_order_no', lensId).single();
+                if (!otherOrder) {
+                    showFeedback('error', `Error: Lens "${lensId}" not found in any of today's boxes.`); Audio.play('error'); return;
+                }
+                if (otherOrder.status === 'Packed') {
+                    showFeedback('error', `Error: Lens "${lensId}" is already packed in another box (${otherOrder.box_id}).`); Audio.play('error'); return;
+                }
+                // Show confirmation modal
+                state.exceptionOrder = otherOrder;
+                UI.exceptionMessage.textContent = `Lens ${lensId} belongs to box ${otherOrder.box_id}. Add it to ${state.currentBoxId} anyway?`;
+                UI.exceptionModal.classList.add('active');
+            }
+        }
+
+        async function updateOrderStatus(lensId, newStatus, newBoxId) {
+            const packedCountBefore = state.orders.filter(o => o.status === 'Packed').length;
+            if (packedCountBefore === 0 && state.orders.length > 0) {
+                await db.from('boxes').update({ status: 'Packing' }).eq('box_id', state.currentBoxId);
+            }
+
+            const { error } = await db.from('orders').update({ status: newStatus, box_id: newBoxId }).eq('gkb_order_no', lensId);
+            if (error) {
+                showFeedback('error', 'Database update failed.'); Audio.play('error'); return;
+            }
+            
+            if (!state.orders.find(o => o.gkb_order_no === lensId)) {
+                const { data: newOrderData } = await db.from('orders').select('*').eq('gkb_order_no', lensId).single();
+                state.orders.push(newOrderData);
+            }
+
+            const order = state.orders.find(o => o.gkb_order_no === lensId);
+            order.status = newStatus;
+            
+            renderLists();
+            showFeedback('success', `Packed ${lensId}`);
+            Audio.play('success');
+
+            const packedCountAfter = state.orders.filter(o => o.status === 'Packed').length;
+            if (packedCountAfter === state.orders.length) {
+                await db.from('boxes').update({ status: 'Packed' }).eq('box_id', state.currentBoxId);
+                showFeedback('success', 'Box Complete!');
+                Audio.play('complete');
+                UI.scannerInput.disabled = true;
+            }
+        }
+
+        async function handleScan(scanValue) {
+            const value = scanValue.trim();
+            if (!value) return;
+
+            const { data: box } = await db.from('boxes').select('box_id').eq('box_id', value).maybeSingle();
+            if (box) {
+                await loadBox(value);
+            } else if (state.currentBoxId) {
+                await packLens(value);
+            } else {
+                showFeedback('error', 'Please scan a valid Box ID first.');
+                Audio.play('error');
+            }
+        }
+        
+        UI.scannerInput.addEventListener('keypress', e => {
+            if (e.key === 'Enter') {
+                handleScan(e.target.value);
+                e.target.value = '';
+            }
+        });
+        
+        UI.confirmExceptionBtn.addEventListener('click', () => {
+            if (state.exceptionOrder) {
+                updateOrderStatus(state.exceptionOrder.gkb_order_no, 'Packed', state.currentBoxId);
+                state.exceptionOrder = null;
+                UI.exceptionModal.classList.remove('active');
+            }
+        });
+
+        UI.cancelExceptionBtn.addEventListener('click', () => {
+            state.exceptionOrder = null;
+            UI.exceptionModal.classList.remove('active');
+        });
+
+        UI.scannerInput.focus();
+    </script>
+</body>
+</html>
